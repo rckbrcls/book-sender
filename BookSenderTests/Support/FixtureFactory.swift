@@ -35,6 +35,12 @@ enum FixtureFactory {
         case invalidPackage
         case ambiguousPackage
         case mediaTypeMismatch
+        case rootPackageLegacyTrueType
+        case legacyFontAliases
+        case referenceCaseDifference
+        case danglingSpineItem
+        case packageLeadingBOM
+        case containerInvalidSinglePackage
         case missingReference
         case ambiguousReference
         case encryptedContent
@@ -54,6 +60,10 @@ enum FixtureFactory {
         case excessiveXML
         case archiveSizeBoundary
     }
+
+    static let canonicalReferenceHref = "cafe\u{0301}.xhtml"
+    static let canonicalReferenceFilename = "Caf\u{00e9}.xhtml"
+    static let danglingSpineIDRef = "missing"
 
     static func makeDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
@@ -157,6 +167,10 @@ enum FixtureFactory {
             switch variant {
             case .invalidContainer:
                 container = "<container><rootfiles>"
+            case .containerInvalidSinglePackage:
+                container = "<not-container/>"
+            case .rootPackageLegacyTrueType:
+                container = containerXML(packagePaths: ["content.opf"])
             case .ambiguousPackage:
                 container = containerXML(
                     packagePaths: ["OEBPS/content.opf", "OPS/other.opf"]
@@ -198,9 +212,16 @@ enum FixtureFactory {
             ? "<package><manifest>"
             : packageXML(version: version, variant: variant)
         if variant != .missingPackage {
+            var packageData = Data(package.utf8)
+            if variant == .packageLeadingBOM {
+                packageData = Data([0xEF, 0xBB, 0xBF, 0x20, 0x0A]) + packageData
+            }
+            let packagePath = variant == .rootPackageLegacyTrueType
+                ? "content.opf"
+                : "OEBPS/content.opf"
             try add(
-                Data(package.utf8),
-                path: "OEBPS/content.opf",
+                packageData,
+                path: packagePath,
                 to: archive,
                 date: fixedDate
             )
@@ -226,12 +247,60 @@ enum FixtureFactory {
                 date: fixedDate
             )
         } else if variant != .missingReference && variant != .ambiguousReference {
+            let chapterPath: String
+            switch variant {
+            case .rootPackageLegacyTrueType:
+                chapterPath = "chapter.xhtml"
+            case .referenceCaseDifference:
+                chapterPath = "OEBPS/\(canonicalReferenceFilename)"
+            default:
+                chapterPath = "OEBPS/chapter.xhtml"
+            }
             try add(
                 Data(chapter.utf8),
-                path: "OEBPS/chapter.xhtml",
+                path: chapterPath,
                 to: archive,
                 date: fixedDate
             )
+        }
+        switch variant {
+        case .rootPackageLegacyTrueType:
+            let font = fontPayload(Data([0x00, 0x01, 0x00, 0x00]))
+            try add(font, path: "Fonts/font-1.ttf", to: archive, date: fixedDate)
+            try add(font, path: "Fonts/font-2.ttf", to: archive, date: fixedDate)
+        case .legacyFontAliases:
+            try add(
+                fontPayload(Data([0x00, 0x01, 0x00, 0x00])),
+                path: "OEBPS/Fonts/book.ttf",
+                to: archive,
+                date: fixedDate
+            )
+            try add(
+                fontPayload(Data("OTTO".utf8)),
+                path: "OEBPS/Fonts/book.otf",
+                to: archive,
+                date: fixedDate
+            )
+            try add(
+                fontPayload(Data("OTTO".utf8)),
+                path: "OEBPS/Fonts/book-opentype.otf",
+                to: archive,
+                date: fixedDate
+            )
+            try add(
+                fontPayload(Data("OTTO".utf8)),
+                path: "OEBPS/Fonts/book-ms.otf",
+                to: archive,
+                date: fixedDate
+            )
+            try add(
+                fontPayload(Data("wOFF".utf8)),
+                path: "OEBPS/Fonts/book.woff",
+                to: archive,
+                date: fixedDate
+            )
+        default:
+            break
         }
         if variant == .epub2LegacyTrueTypeMediaType {
             try add(
@@ -447,10 +516,107 @@ enum FixtureFactory {
         return Data(encoded.utf8)
     }
 
+    private static func fontPayload(_ signature: Data) -> Data {
+        var data = signature
+        data.append(Data(repeating: 0x00, count: 16))
+        return data
+    }
+
+    private static func rootPackageLegacyTrueTypeXML() -> String {
+        """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">
+          <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <dc:identifier id="book-id">fixture</dc:identifier>
+            <dc:title>Fixture</dc:title>
+            <dc:language>en</dc:language>
+          </metadata>
+          <!--preserve-->
+          <manifest>
+            <item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/>
+            <item id="font-1" href="Fonts/font-1.ttf" media-type="application/x-font-truetype"/>
+            <item id="font-2" href="Fonts/font-2.ttf" media-type="application/x-font-truetype"/>
+          </manifest>
+          <spine><itemref idref="chapter"/></spine>
+        </package>
+        """
+    }
+
+    private static func legacyFontAliasesXML() -> String {
+        """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">
+          <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <dc:identifier id="book-id">fixture</dc:identifier>
+            <dc:title>Fixture</dc:title>
+            <dc:language>en</dc:language>
+          </metadata>
+          <!--preserve-->
+          <manifest>
+            <item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/>
+            <item id="ttf" href="Fonts/book.ttf" media-type="application/x-font-truetype"/>
+            <item id="otf" href="Fonts/book.otf" media-type="application/x-font-otf"/>
+            <item id="opentype" href="Fonts/book-opentype.otf" media-type="application/x-font-opentype"/>
+            <item id="ms-otf" href="Fonts/book-ms.otf" media-type="application/vnd.ms-opentype"/>
+            <item id="woff" href="Fonts/book.woff" media-type="application/font-woff"/>
+          </manifest>
+          <spine><itemref idref="chapter"/></spine>
+        </package>
+        """
+    }
+
+    private static func referenceCaseDifferenceXML() -> String {
+        """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">
+          <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <dc:identifier id="book-id">fixture</dc:identifier>
+            <dc:title>Fixture</dc:title>
+            <dc:language>en</dc:language>
+          </metadata>
+          <!--preserve-->
+          <manifest>
+            <item id="chapter" href="\(canonicalReferenceHref)" media-type="application/xhtml+xml"/>
+          </manifest>
+          <spine><itemref idref="chapter"/></spine>
+        </package>
+        """
+    }
+
+    private static func danglingSpineItemXML() -> String {
+        """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">
+          <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <dc:identifier id="book-id">fixture</dc:identifier>
+            <dc:title>Fixture</dc:title>
+            <dc:language>en</dc:language>
+          </metadata>
+          <!--preserve-->
+          <manifest>
+            <item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/>
+          </manifest>
+          <spine><itemref idref="chapter"/><itemref idref="\(danglingSpineIDRef)"/></spine>
+        </package>
+        """
+    }
+
     private static func packageXML(
         version: String,
         variant: EPUBVariant
     ) -> String {
+        switch variant {
+        case .rootPackageLegacyTrueType:
+            return rootPackageLegacyTrueTypeXML()
+        case .legacyFontAliases:
+            return legacyFontAliasesXML()
+        case .referenceCaseDifference:
+            return referenceCaseDifferenceXML()
+        case .danglingSpineItem:
+            return danglingSpineItemXML()
+        default:
+            break
+        }
         let href: String
         switch variant {
         case .missingReference:

@@ -44,8 +44,7 @@ struct EPUBAuditEngine: EPUBAuditing {
 
         let packagePath: String
         if !paths.contains("META-INF/container.xml") {
-            let packages = paths.filter { $0.lowercased().hasSuffix(".opf") }
-            if packages.count == 1, let package = packages.first {
+            if let package = solePackagePath(in: paths) {
                 findings.append(
                     finding(
                         .containerMissing,
@@ -56,6 +55,7 @@ struct EPUBAuditEngine: EPUBAuditing {
                 )
                 packagePath = package
             } else {
+                let packages = paths.filter { $0.lowercased().hasSuffix(".opf") }
                 findings.append(
                     finding(
                         .containerMissing,
@@ -74,85 +74,18 @@ struct EPUBAuditEngine: EPUBAuditing {
                 }
                 return report(findings)
             }
+        } else if let package = try await selectedPackage(
+            paths: paths,
+            archive: archive,
+            findings: &findings
+        ) {
+            packagePath = package
         } else {
-            do {
-                let containerData = try await archive.data(
-                    for: "META-INF/container.xml",
-                    maximumBytes: limits.maximumXMLBytes
-                )
-                let container = try await xmlParser.parse(
-                    containerData,
-                    limits: limits
-                )
-                guard container.rootName.hasSuffix("container") else {
-                    findings.append(
-                        finding(
-                            .containerInvalid,
-                            .error,
-                            .manualReview,
-                            location: "META-INF/container.xml"
-                        )
-                    )
-                    return report(findings)
-                }
-                let packagePaths = container.elements.compactMap {
-                    $0.name.hasSuffix("rootfile")
-                        ? $0.attributes["full-path"]
-                        : nil
-                }
-                let uniquePackages = Array(Set(packagePaths))
-                guard uniquePackages.count == 1,
-                      let selected = uniquePackages.first
-                else {
-                    findings.append(
-                        finding(
-                            uniquePackages.isEmpty
-                                ? .packageMissing
-                                : .packageAmbiguous,
-                            .error,
-                            uniquePackages.isEmpty
-                                ? .notApplicable
-                                : .manualReview
-                        )
-                    )
-                    return report(findings)
-                }
-                guard paths.contains(selected) else {
-                    findings.append(
-                        finding(
-                            .packageMissing,
-                            .error,
-                            .notApplicable,
-                            location: selected
-                        )
-                    )
-                    return report(findings)
-                }
-                packagePath = selected
-            } catch let failure as SanitizedFailure {
-                findings.append(
-                    xmlFinding(
-                        failure,
-                        fallback: .containerInvalid,
-                        location: "META-INF/container.xml"
-                    )
-                )
-                return report(findings)
-            } catch {
-                findings.append(
-                    finding(
-                        .containerInvalid,
-                        .error,
-                        .manualReview,
-                        location: "META-INF/container.xml"
-                    )
-                )
-                return report(findings)
-            }
+            return report(findings)
         }
 
         findings.append(
-            contentsOf: await auditPackage(
+            contentsOf: try await auditPackage(
                 packagePath,
                 paths: paths,
                 archive: archive
@@ -214,14 +147,15 @@ struct EPUBAuditEngine: EPUBAuditing {
         _ packagePath: String,
         paths: Set<String>,
         archive: any EPUBArchiveReading
-    ) async -> [HealthFinding] {
-        let package: XMLDocumentProjection
+    ) async throws -> [HealthFinding] {
+        let data: Data
         do {
-            let data = try await archive.data(
+            data = try await archive.data(
                 for: packagePath,
                 maximumBytes: limits.maximumXMLBytes
             )
-            package = try await xmlParser.parse(data, limits: limits)
+        } catch is CancellationError {
+            throw CancellationError()
         } catch let failure as SanitizedFailure {
             return [
                 xmlFinding(
@@ -241,7 +175,24 @@ struct EPUBAuditEngine: EPUBAuditing {
             ]
         }
 
-        guard package.rootName.hasSuffix("package") else {
+        let parsed: ParsedMarkup
+        do {
+            parsed = try await parseMarkup(
+                data,
+                path: packagePath,
+                failureCode: .packageInvalid
+            )
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let failure as SanitizedFailure {
+            return [
+                xmlFinding(
+                    failure,
+                    fallback: .packageInvalid,
+                    location: packagePath
+                ),
+            ]
+        } catch {
             return [
                 finding(
                     .packageInvalid,
@@ -253,17 +204,34 @@ struct EPUBAuditEngine: EPUBAuditing {
         }
 
         var findings: [HealthFinding] = []
-        let packageDirectory = (packagePath as NSString).deletingLastPathComponent
-        let manifestItems = package.elements.filter { $0.name.hasSuffix("item") }
-        guard !manifestItems.isEmpty else {
-            return [
+        if let normalized = parsed.normalizedXML {
+            findings.append(normalized)
+        }
+        let package = parsed.document
+        guard package.rootName.hasSuffix("package") else {
+            findings.append(
                 finding(
                     .packageInvalid,
                     .error,
                     .manualReview,
                     location: packagePath
-                ),
-            ]
+                )
+            )
+            return findings
+        }
+
+        let packageDirectory = (packagePath as NSString).deletingLastPathComponent
+        let manifestItems = package.elements.filter { $0.name.hasSuffix("item") }
+        guard !manifestItems.isEmpty else {
+            findings.append(
+                finding(
+                    .packageInvalid,
+                    .error,
+                    .manualReview,
+                    location: packagePath
+                )
+            )
+            return findings
         }
         var IDs = Set<String>()
         for item in manifestItems {
@@ -306,25 +274,13 @@ struct EPUBAuditEngine: EPUBAuditing {
                 continue
             }
             if !paths.contains(resolved) {
-                let canonicalMatches = paths.filter {
-                    $0.precomposedStringWithCanonicalMapping.lowercased()
-                        == resolved.precomposedStringWithCanonicalMapping.lowercased()
-                }
-                let basename = (resolved as NSString).lastPathComponent
-                let suffixMatches = paths.filter {
-                    ($0 as NSString).lastPathComponent == basename
-                }
-                let matches = canonicalMatches.isEmpty
-                    ? suffixMatches
-                    : canonicalMatches
                 findings.append(
-                    finding(
-                        matches.count > 1
-                            ? .referenceAmbiguous
-                            : .referenceMissing,
-                        .error,
-                        .manualReview,
-                        location: resolved
+                    referenceFinding(
+                        href: href,
+                        resolved: resolved,
+                        packagePath: packagePath,
+                        packageDirectory: packageDirectory,
+                        paths: paths
                     )
                 )
             }
@@ -332,16 +288,43 @@ struct EPUBAuditEngine: EPUBAuditing {
             let normalizedDeclaredType = normalizedMediaType(declaredType)
             if let expectation = mediaTypeExpectation(for: resolved),
                !expectation.compatible.contains(normalizedDeclaredType) {
+                let decision = try await mediaTypeDecision(
+                    declared: normalizedDeclaredType,
+                    path: resolved,
+                    archive: archive
+                )
+                if decision == .unsafe {
+                    findings.append(
+                        finding(
+                            .xmlUnsafe,
+                            .critical,
+                            .forbidden,
+                            location: resolved
+                        )
+                    )
+                }
+                let repairsMediaType = decision == .automatic
+                    && !packagePath.isEmpty
+                    && !href.isEmpty
+                    && !declaredType.isEmpty
+                    && !expectation.preferred.isEmpty
+                var evidence = [
+                    "declared": declaredType,
+                    "expected": expectation.preferred,
+                ]
+                if repairsMediaType {
+                    evidence["package"] = packagePath
+                    evidence["href"] = href
+                }
                 findings.append(
                     finding(
                         .manifestMediaTypeMismatch,
                         .error,
-                        .manualReview,
+                        repairsMediaType
+                            ? .automatic(ruleID: "repair.media-type")
+                            : .manualReview,
                         location: resolved,
-                        evidence: [
-                            "declared": declaredType,
-                            "expected": expectation.preferred,
-                        ]
+                        evidence: evidence
                     )
                 )
             }
@@ -359,11 +342,17 @@ struct EPUBAuditEngine: EPUBAuditing {
             }
         }
 
-        for itemReference in package.elements where
-            itemReference.name.hasSuffix("itemref") {
-            guard let identifier = itemReference.attributes["idref"],
-                  IDs.contains(identifier)
-            else {
+        let spineReferences = package.elements.filter {
+            $0.name.hasSuffix("itemref")
+        }
+        let resolvableSpineCount = spineReferences.filter { itemReference in
+            guard let identifier = itemReference.attributes["idref"] else {
+                return false
+            }
+            return IDs.contains(identifier)
+        }.count
+        for itemReference in spineReferences {
+            guard let identifier = itemReference.attributes["idref"] else {
                 findings.append(
                     finding(
                         .referenceMissing,
@@ -373,6 +362,30 @@ struct EPUBAuditEngine: EPUBAuditing {
                     )
                 )
                 continue
+            }
+            guard !IDs.contains(identifier) else { continue }
+            if resolvableSpineCount >= 1, !identifier.isEmpty {
+                findings.append(
+                    finding(
+                        .referenceMissing,
+                        .error,
+                        .automatic(ruleID: "repair.spine"),
+                        location: "\(packagePath)#\(identifier)",
+                        evidence: [
+                            "package": packagePath,
+                            "idref": identifier,
+                        ]
+                    )
+                )
+            } else {
+                findings.append(
+                    finding(
+                        .referenceMissing,
+                        .error,
+                        .manualReview,
+                        location: packagePath
+                    )
+                )
             }
         }
 
@@ -434,6 +447,506 @@ struct EPUBAuditEngine: EPUBAuditing {
                 ),
             ]
         }
+    }
+
+    private func selectedPackage(
+        paths: Set<String>,
+        archive: any EPUBArchiveReading,
+        findings: inout [HealthFinding]
+    ) async throws -> String? {
+        let containerPath = "META-INF/container.xml"
+        let containerData: Data
+        do {
+            containerData = try await archive.data(
+                for: containerPath,
+                maximumBytes: limits.maximumXMLBytes
+            )
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let failure as SanitizedFailure {
+            return containerRecovery(
+                failure: failure,
+                paths: paths,
+                findings: &findings
+            )
+        } catch {
+            return restoredPackage(
+                paths: paths,
+                findings: &findings,
+                code: .containerInvalid,
+                location: containerPath
+            )
+        }
+
+        do {
+            let parsed = try await parseMarkup(
+                containerData,
+                path: containerPath,
+                failureCode: .containerInvalid
+            )
+            if let normalized = parsed.normalizedXML {
+                findings.append(normalized)
+            }
+            guard parsed.document.rootName.hasSuffix("container") else {
+                return restoredPackage(
+                    paths: paths,
+                    findings: &findings,
+                    code: .containerInvalid,
+                    location: containerPath
+                )
+            }
+            let declaredPackages = parsed.document.elements.compactMap {
+                $0.name.hasSuffix("rootfile") ? $0.attributes["full-path"] : nil
+            }
+            let uniquePackages = Array(Set(declaredPackages))
+            guard uniquePackages.count == 1, let selected = uniquePackages.first else {
+                findings.append(
+                    finding(
+                        uniquePackages.isEmpty ? .packageMissing : .packageAmbiguous,
+                        .error,
+                        uniquePackages.isEmpty ? .notApplicable : .manualReview
+                    )
+                )
+                return nil
+            }
+            if paths.contains(selected) {
+                return selected
+            }
+            guard let package = solePackagePath(in: paths) else {
+                let packageCount = paths.filter {
+                    $0.lowercased().hasSuffix(".opf")
+                }.count
+                findings.append(
+                    finding(
+                        .packageMissing,
+                        .error,
+                        packageCount > 1 ? .manualReview : .notApplicable,
+                        location: selected
+                    )
+                )
+                return nil
+            }
+            findings.append(
+                finding(
+                    .packageMissing,
+                    .error,
+                    .automatic(ruleID: "repair.container"),
+                    location: selected,
+                    evidence: ["package": package]
+                )
+            )
+            return package
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let failure as SanitizedFailure {
+            return containerRecovery(
+                failure: failure,
+                paths: paths,
+                findings: &findings
+            )
+        } catch {
+            return restoredPackage(
+                paths: paths,
+                findings: &findings,
+                code: .containerInvalid,
+                location: containerPath
+            )
+        }
+    }
+
+    private func containerRecovery(
+        failure: SanitizedFailure,
+        paths: Set<String>,
+        findings: inout [HealthFinding]
+    ) -> String? {
+        if Self.unsafeXMLCodes.contains(failure.code) {
+            findings.append(
+                xmlFinding(
+                    failure,
+                    fallback: .containerInvalid,
+                    location: "META-INF/container.xml"
+                )
+            )
+            return nil
+        }
+        return restoredPackage(
+            paths: paths,
+            findings: &findings,
+            code: .containerInvalid,
+            location: "META-INF/container.xml"
+        )
+    }
+
+    private func restoredPackage(
+        paths: Set<String>,
+        findings: inout [HealthFinding],
+        code: FindingCode,
+        location: String
+    ) -> String? {
+        guard let package = solePackagePath(in: paths) else {
+            findings.append(
+                finding(code, .error, .manualReview, location: location)
+            )
+            return nil
+        }
+        findings.append(
+            finding(
+                code,
+                .error,
+                .automatic(ruleID: "repair.container"),
+                location: location,
+                evidence: ["package": package]
+            )
+        )
+        return package
+    }
+
+    private func solePackagePath(in paths: Set<String>) -> String? {
+        let packages = paths.filter { $0.lowercased().hasSuffix(".opf") }
+        guard packages.count == 1 else { return nil }
+        return packages.first
+    }
+
+    private func parseMarkup(
+        _ data: Data,
+        path: String,
+        failureCode: FindingCode
+    ) async throws -> ParsedMarkup {
+        do {
+            return ParsedMarkup(
+                document: try await xmlParser.parse(data, limits: limits),
+                normalizedXML: nil
+            )
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let failure as SanitizedFailure {
+            if Self.unsafeXMLCodes.contains(failure.code) {
+                throw failure
+            }
+            guard let stripped = strippedXMLPrefix(data) else { throw failure }
+            do {
+                let document = try await xmlParser.parse(stripped, limits: limits)
+                return ParsedMarkup(
+                    document: document,
+                    normalizedXML: finding(
+                        failureCode,
+                        .error,
+                        .automatic(ruleID: "repair.xml"),
+                        location: path,
+                        evidence: ["path": path]
+                    )
+                )
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let strippedFailure as SanitizedFailure {
+                if Self.unsafeXMLCodes.contains(strippedFailure.code) {
+                    throw strippedFailure
+                }
+                throw failure
+            }
+        }
+    }
+
+    private func strippedXMLPrefix(_ data: Data) -> Data? {
+        let bytes = [UInt8](data)
+        var index = 0
+        var stripped = false
+        while index < bytes.count {
+            if index + 2 < bytes.count,
+               bytes[index] == 0xEF,
+               bytes[index + 1] == 0xBB,
+               bytes[index + 2] == 0xBF {
+                index += 3
+                stripped = true
+                continue
+            }
+            if bytes[index] == 0x20
+                || bytes[index] == 0x09
+                || bytes[index] == 0x0A
+                || bytes[index] == 0x0D {
+                index += 1
+                stripped = true
+                continue
+            }
+            break
+        }
+        guard stripped, index < bytes.count else { return nil }
+        let remainder = Data(bytes[index...])
+        guard remainder.starts(with: Data("<?xml".utf8)) else { return nil }
+        return remainder
+    }
+
+    private func referenceFinding(
+        href: String,
+        resolved: String,
+        packagePath: String,
+        packageDirectory: String,
+        paths: Set<String>
+    ) -> HealthFinding {
+        let canonicalKey = resolved.precomposedStringWithCanonicalMapping.lowercased()
+        let canonicalMatches = paths.filter {
+            $0.precomposedStringWithCanonicalMapping.lowercased() == canonicalKey
+        }
+        let candidate: String?
+        let ambiguous: Bool
+        if !canonicalMatches.isEmpty {
+            candidate = canonicalMatches.count == 1 ? canonicalMatches.first : nil
+            ambiguous = canonicalMatches.count > 1
+        } else {
+            let basename = (resolved as NSString).lastPathComponent
+            let suffixMatches = paths.filter {
+                ($0 as NSString).lastPathComponent == basename
+            }
+            candidate = suffixMatches.count == 1 ? suffixMatches.first : nil
+            ambiguous = suffixMatches.count > 1
+        }
+        if ambiguous {
+            return finding(
+                .referenceAmbiguous,
+                .error,
+                .manualReview,
+                location: resolved
+            )
+        }
+        if let candidate,
+           let rewritten = manifestHref(
+               for: candidate,
+               packageDirectory: packageDirectory
+           ),
+           rewritten != href {
+            return finding(
+                .referenceMissing,
+                .error,
+                .automatic(ruleID: "repair.reference"),
+                location: resolved,
+                evidence: [
+                    "package": packagePath,
+                    "from": href,
+                    "to": rewritten,
+                ]
+            )
+        }
+        return finding(
+            .referenceMissing,
+            .error,
+            .manualReview,
+            location: resolved
+        )
+    }
+
+    private func manifestHref(
+        for archivePath: String,
+        packageDirectory: String
+    ) -> String? {
+        let relative: String
+        if packageDirectory.isEmpty {
+            relative = archivePath
+        } else if archivePath.hasPrefix(packageDirectory + "/") {
+            relative = String(archivePath.dropFirst(packageDirectory.count + 1))
+        } else {
+            let base = packageDirectory.split(separator: "/").map(String.init)
+            let target = archivePath.split(separator: "/").map(String.init)
+            var shared = 0
+            while shared < base.count,
+                  shared < target.count,
+                  base[shared] == target[shared] {
+                shared += 1
+            }
+            let upward = Array(repeating: "..", count: base.count - shared)
+            relative = (upward + Array(target[shared...])).joined(separator: "/")
+        }
+        guard !relative.isEmpty else { return nil }
+        return relative
+    }
+
+    private func mediaTypeDecision(
+        declared: String,
+        path: String,
+        archive: any EPUBArchiveReading
+    ) async throws -> MediaTypeDecision {
+        let pathExtension = (path as NSString).pathExtension.lowercased()
+        if legacyMediaTypeAliases(for: pathExtension).contains(declared) {
+            return .automatic
+        }
+        switch try await contentVerdict(for: path, archive: archive) {
+        case .confirms:
+            if Self.xmlExtensions.contains(pathExtension),
+               declaredTypeConflictsWithXMLExtension(declared) {
+                return .manual
+            }
+            return .automatic
+        case .contradicts, .unknown:
+            return .manual
+        case .unsafe:
+            return .unsafe
+        }
+    }
+
+    private func contentVerdict(
+        for path: String,
+        archive: any EPUBArchiveReading
+    ) async throws -> ContentVerdict {
+        let pathExtension = (path as NSString).pathExtension.lowercased()
+        let maximumBytes = Self.xmlExtensions.contains(pathExtension)
+            ? limits.maximumXMLBytes
+            : Int(limits.maximumEntryBytes)
+        let data: Data
+        do {
+            data = try await archive.data(for: path, maximumBytes: maximumBytes)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            return .unknown
+        }
+        switch pathExtension {
+        case "jpg", "jpeg":
+            return binaryVerdict(
+                data,
+                confirming: { self.isJPEG($0) },
+                signatureLength: 3
+            )
+        case "png":
+            return binaryVerdict(
+                data,
+                confirming: { self.isPNG($0) },
+                signatureLength: 8
+            )
+        case "gif":
+            return binaryVerdict(
+                data,
+                confirming: { self.isGIF($0) },
+                signatureLength: 6
+            )
+        case "ttf":
+            return binaryVerdict(
+                data,
+                confirming: { self.isTrueType($0) },
+                signatureLength: 4
+            )
+        case "otf":
+            return binaryVerdict(
+                data,
+                confirming: { self.isOpenType($0) },
+                signatureLength: 4
+            )
+        case "xhtml", "html", "htm", "ncx":
+            if hasKnownBinaryMagic(data) { return .contradicts }
+            return try await xmlContentVerdict(data)
+        default:
+            return .unknown
+        }
+    }
+
+    private func binaryVerdict(
+        _ data: Data,
+        confirming: (Data) -> Bool,
+        signatureLength: Int
+    ) -> ContentVerdict {
+        guard data.count >= signatureLength else { return .unknown }
+        return confirming(data) ? .confirms : .contradicts
+    }
+
+    private func xmlContentVerdict(_ data: Data) async throws -> ContentVerdict {
+        guard !data.isEmpty else { return .unknown }
+        do {
+            _ = try await xmlParser.parse(data, limits: limits)
+            return .confirms
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let failure as SanitizedFailure
+            where Self.unsafeXMLCodes.contains(failure.code) {
+            return .unsafe
+        } catch {
+            return .unknown
+        }
+    }
+
+    private func legacyMediaTypeAliases(for pathExtension: String) -> Set<String> {
+        switch pathExtension {
+        case "ttf":
+            [
+                "application/x-font-truetype",
+                "application/font-truetype",
+                "font/truetype",
+            ]
+        case "otf":
+            [
+                "application/x-font-otf",
+                "application/font-opentype",
+                "font/opentype",
+            ]
+        case "woff":
+            [
+                "application/x-woff",
+                "font/x-woff",
+            ]
+        case "woff2":
+            [
+                "application/font-woff",
+                "application/x-font-woff",
+                "application/font-woff2",
+                "application/x-font-woff2",
+                "font/x-woff2",
+            ]
+        case "jpg", "jpeg":
+            [
+                "image/jpg",
+                "image/pjpeg",
+            ]
+        case "png":
+            ["image/x-png"]
+        case "gif":
+            ["image/x-gif"]
+        default:
+            []
+        }
+    }
+
+    private func declaredTypeConflictsWithXMLExtension(_ declared: String) -> Bool {
+        if declared.hasPrefix("image/") || declared.hasPrefix("font/") {
+            return true
+        }
+        return [
+            "application/x-font-truetype",
+            "application/font-truetype",
+            "application/x-font-ttf",
+            "application/x-font-otf",
+            "application/font-opentype",
+            "application/x-font-opentype",
+            "application/vnd.ms-opentype",
+            "application/font-sfnt",
+            "application/font-woff",
+            "application/x-font-woff",
+            "application/font-woff2",
+            "application/x-font-woff2",
+            "application/x-woff",
+        ].contains(declared)
+    }
+
+    private func isJPEG(_ data: Data) -> Bool {
+        data.count >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF
+    }
+
+    private func isPNG(_ data: Data) -> Bool {
+        data.starts(with: Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]))
+    }
+
+    private func isGIF(_ data: Data) -> Bool {
+        data.starts(with: Data("GIF87a".utf8))
+            || data.starts(with: Data("GIF89a".utf8))
+    }
+
+    private func isTrueType(_ data: Data) -> Bool {
+        data.starts(with: Data([0x00, 0x01, 0x00, 0x00]))
+            || data.starts(with: Data("true".utf8))
+    }
+
+    private func isOpenType(_ data: Data) -> Bool {
+        data.starts(with: Data("OTTO".utf8))
+    }
+
+    private func hasKnownBinaryMagic(_ data: Data) -> Bool {
+        isJPEG(data) || isPNG(data) || isGIF(data) || isTrueType(data) || isOpenType(data)
     }
 
     private func resolve(_ href: String, relativeTo directory: String) -> String? {
@@ -522,6 +1035,19 @@ struct EPUBAuditEngine: EPUBAuditing {
         }
     }
 
+    private static let unsafeXMLCodes: Set<DiagnosticCode> = [
+        .xmlByteLimit,
+        .xmlExternalEntity,
+        .xmlStructureLimit,
+        .xmlTextLimit,
+        .xmlTimeout,
+        .xmlCancelled,
+    ]
+
+    private static let xmlExtensions: Set<String> = [
+        "xhtml", "html", "htm", "ncx",
+    ]
+
     private var scriptMediaTypes: Set<String> {
         [
             "application/ecmascript",
@@ -565,15 +1091,7 @@ struct EPUBAuditEngine: EPUBAuditing {
         fallback: FindingCode,
         location: String
     ) -> HealthFinding {
-        let unsafeCodes: Set<DiagnosticCode> = [
-            .xmlByteLimit,
-            .xmlExternalEntity,
-            .xmlStructureLimit,
-            .xmlTextLimit,
-            .xmlTimeout,
-            .xmlCancelled,
-        ]
-        if unsafeCodes.contains(failure.code) {
+        if Self.unsafeXMLCodes.contains(failure.code) {
             return finding(
                 .xmlUnsafe,
                 .critical,
@@ -639,4 +1157,22 @@ struct EPUBAuditEngine: EPUBAuditing {
 private struct MediaTypeExpectation {
     let preferred: String
     let compatible: Set<String>
+}
+
+private struct ParsedMarkup {
+    let document: XMLDocumentProjection
+    let normalizedXML: HealthFinding?
+}
+
+private enum MediaTypeDecision: Equatable {
+    case automatic
+    case manual
+    case unsafe
+}
+
+private enum ContentVerdict {
+    case confirms
+    case contradicts
+    case unknown
+    case unsafe
 }

@@ -144,6 +144,60 @@
       "expectedReady": false
     },
     {
+      "id": "root-package-legacy-truetype",
+      "kind": "epub",
+      "definitionDigest": "42f40bda28f57c942f49ebaf2d74fdd6f710c2c1ff67181b4e4014d6a40265ff",
+      "expectedHealth": "repairable",
+      "findingCodes": ["MANIFEST_MEDIA_TYPE_MISMATCH"],
+      "repairActions": ["repair.media-type"],
+      "expectedReady": true
+    },
+    {
+      "id": "legacy-font-aliases",
+      "kind": "epub",
+      "definitionDigest": "dbe87cf7352b62c83288ce75f2bc7bcc3dff2f705bfd83e7aa1d5358f20f840a",
+      "expectedHealth": "repairable",
+      "findingCodes": ["MANIFEST_MEDIA_TYPE_MISMATCH"],
+      "repairActions": ["repair.media-type"],
+      "expectedReady": true
+    },
+    {
+      "id": "reference-case-difference",
+      "kind": "epub",
+      "definitionDigest": "8d4f60240e970e3b72f4a3082c17863c98cbd58c3ddac9f84ec133c2fb60985c",
+      "expectedHealth": "repairable",
+      "findingCodes": ["REFERENCE_MISSING"],
+      "repairActions": ["repair.reference"],
+      "expectedReady": true
+    },
+    {
+      "id": "dangling-spine-item",
+      "kind": "epub",
+      "definitionDigest": "64276965f69df76ab5e400e759cce768482d685a31c161ea03b354e1869d2f3b",
+      "expectedHealth": "repairable",
+      "findingCodes": ["REFERENCE_MISSING"],
+      "repairActions": ["repair.spine"],
+      "expectedReady": true
+    },
+    {
+      "id": "package-leading-bom",
+      "kind": "epub",
+      "definitionDigest": "2ca251c2bc4a93abc7c82a4c3735ad9a324acc65c7ee2ed4459f991d78c07ab7",
+      "expectedHealth": "repairable",
+      "findingCodes": ["PACKAGE_INVALID"],
+      "repairActions": ["repair.xml"],
+      "expectedReady": true
+    },
+    {
+      "id": "container-invalid-single-package",
+      "kind": "epub",
+      "definitionDigest": "204777a9278d746f4c1853a763b92b3e8b60e8ad864270644e1e8ee0e0fbad00",
+      "expectedHealth": "repairable",
+      "findingCodes": ["CONTAINER_INVALID"],
+      "repairActions": ["repair.container"],
+      "expectedReady": true
+    },
+    {
       "id": "missing-reference",
       "kind": "epub",
       "definitionDigest": "fe4a4098d7aca5da9f49f73cf0001da8739437d5ee4a15322a8c2fbb450d47dc",
