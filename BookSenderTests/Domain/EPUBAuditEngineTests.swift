@@ -20,7 +20,7 @@ struct EPUBAuditEngineTests {
             (.lateMimetype, .repairable, [.mimetypeNotFirst]),
             (.compressedMimetype, .repairable, [.mimetypeCompressed]),
             (.missingContainer, .repairable, [.containerMissing]),
-            (.invalidContainer, .needsReview, [.containerInvalid]),
+            (.invalidContainer, .repairable, [.containerInvalid]),
             (.missingPackage, .unsupported, [.packageMissing]),
             (.invalidPackage, .needsReview, [.packageInvalid]),
             (.ambiguousPackage, .needsReview, [.packageAmbiguous]),

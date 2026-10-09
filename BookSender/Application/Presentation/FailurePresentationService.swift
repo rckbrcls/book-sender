@@ -308,6 +308,12 @@ struct FailurePresentationService: Sendable {
                 summary: "An internal reference could not be resolved unambiguously.",
                 impact: "The EPUB is not ready to send."
             )
+        case .repairSpine:
+            repairEntry(
+                title: "EPUB spine repair failed",
+                summary: "A spine entry could not be removed deterministically.",
+                impact: "The EPUB is not ready to send."
+            )
         case .repairXML:
             repairEntry(
                 title: "EPUB XML repair failed",
@@ -728,7 +734,8 @@ struct FailurePresentationService: Sendable {
              .repairFailed, .repairInvalidPlan, .repairMediaType,
              .repairMimetype, .repairOutputCreate, .repairPath,
              .repairPrecondition, .repairReference, .repairRevalidationFailed,
-             .repairTimeout, .repairUnsupportedAction, .repairWrite, .repairXML,
+             .repairSpine, .repairTimeout, .repairUnsupportedAction,
+             .repairWrite, .repairXML,
              .workspaceCollision, .workspaceCopy, .workspaceInvalidMarker,
              .workspaceInvalidPath, .workspaceMarker, .workspacePartialCreate,
              .workspacePromote, .workspaceSizeLimit, .workspaceTimeout,

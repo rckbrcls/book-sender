@@ -46,6 +46,7 @@ enum DiagnosticCode: String, Codable, CaseIterable, Hashable, Sendable {
     case repairPrecondition = "repair.precondition"
     case repairReference = "repair.reference"
     case repairRevalidationFailed = "repair.revalidation-failed"
+    case repairSpine = "repair.spine"
     case repairTimeout = "repair.timeout"
     case repairUnsupportedAction = "repair.unsupported-action"
     case repairWrite = "repair.write"
@@ -148,8 +149,8 @@ enum DiagnosticCode: String, Codable, CaseIterable, Hashable, Sendable {
              .repairFailed, .repairInvalidPlan, .repairMediaType,
              .repairMimetype, .repairOutputCreate, .repairPath,
              .repairPrecondition, .repairReference, .repairRevalidationFailed,
-             .repairTimeout, .repairUnsupportedAction, .repairWrite,
-             .repairXML, .unexpectedRepair:
+             .repairSpine, .repairTimeout, .repairUnsupportedAction,
+             .repairWrite, .repairXML, .unexpectedRepair:
             return .repair
         case .workspaceCollision, .workspaceCopy, .workspaceInvalidMarker,
              .workspaceInvalidPath, .workspaceMarker, .workspacePartialCreate,

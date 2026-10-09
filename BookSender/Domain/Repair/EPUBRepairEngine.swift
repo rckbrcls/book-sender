@@ -29,25 +29,13 @@ struct EPUBRepairEngine: RepairPlanning, ReportComparing, EPUBPreparing {
             )
         }
 
-        var actionIDs = Set<String>()
         var actions: [RepairAction] = []
         var postconditions = Set<FindingCode>()
         for finding in report.findings {
             guard case .automatic(let ruleID) = finding.repairability else {
                 continue
             }
-            let action: RepairAction?
-            switch ruleID {
-            case "repair.mimetype":
-                action = .rebuildMimetype
-            case "repair.container":
-                action = finding.evidence["package"].map {
-                    .restoreContainer(packagePath: $0)
-                }
-            default:
-                action = nil
-            }
-            guard let action else {
+            guard let action = repairAction(ruleID: ruleID, evidence: finding.evidence) else {
                 return PreparationPlan(
                     id: UUID(),
                     originalAuditIdentifier: report.id,
@@ -57,7 +45,7 @@ struct EPUBRepairEngine: RepairPlanning, ReportComparing, EPUBPreparing {
                 )
             }
             postconditions.insert(finding.code)
-            if actionIDs.insert(action.identifier).inserted {
+            if !actions.contains(action) {
                 actions.append(action)
             }
         }
@@ -252,12 +240,12 @@ struct EPUBRepairEngine: RepairPlanning, ReportComparing, EPUBPreparing {
         }
     }
 
-    private func postconditions(for action: RepairAction) -> Set<FindingCode> {
+    func postconditions(for action: RepairAction) -> Set<FindingCode> {
         switch action {
         case .rebuildMimetype:
             [.mimetypeMissing, .mimetypeInvalid, .mimetypeNotFirst, .mimetypeCompressed]
         case .restoreContainer:
-            [.containerMissing]
+            [.containerMissing, .containerInvalid, .packageMissing]
         case .correctMediaType:
             [.manifestMediaTypeMismatch]
         case .normalizePath:
@@ -265,8 +253,74 @@ struct EPUBRepairEngine: RepairPlanning, ReportComparing, EPUBPreparing {
         case .repairReference:
             [.referenceMissing, .referenceAmbiguous]
         case .normalizeXML:
-            [.xmlUnsafe]
+            [.containerInvalid, .packageInvalid]
+        case .removeDanglingSpineItem:
+            [.referenceMissing]
         }
+    }
+
+    private func repairAction(
+        ruleID: String,
+        evidence: [String: String]
+    ) -> RepairAction? {
+        switch ruleID {
+        case "repair.mimetype":
+            .rebuildMimetype
+        case "repair.container":
+            evidenceValue(evidence, "package").map {
+                .restoreContainer(packagePath: $0)
+            }
+        case "repair.media-type":
+            mediaTypeAction(evidence)
+        case "repair.reference":
+            referenceAction(evidence)
+        case "repair.xml":
+            evidenceValue(evidence, "path").map {
+                .normalizeXML(path: $0)
+            }
+        case "repair.spine":
+            spineAction(evidence)
+        default:
+            nil
+        }
+    }
+
+    private func mediaTypeAction(_ evidence: [String: String]) -> RepairAction? {
+        guard let package = evidenceValue(evidence, "package"),
+              let href = evidenceValue(evidence, "href"),
+              let from = evidenceValue(evidence, "declared"),
+              let to = evidenceValue(evidence, "expected")
+        else {
+            return nil
+        }
+        return .correctMediaType(package: package, href: href, from: from, to: to)
+    }
+
+    private func referenceAction(_ evidence: [String: String]) -> RepairAction? {
+        guard let document = evidenceValue(evidence, "package"),
+              let from = evidenceValue(evidence, "from"),
+              let to = evidenceValue(evidence, "to")
+        else {
+            return nil
+        }
+        return .repairReference(document: document, from: from, to: to)
+    }
+
+    private func spineAction(_ evidence: [String: String]) -> RepairAction? {
+        guard let package = evidenceValue(evidence, "package"),
+              let idref = evidenceValue(evidence, "idref")
+        else {
+            return nil
+        }
+        return .removeDanglingSpineItem(package: package, idref: idref)
+    }
+
+    private func evidenceValue(
+        _ evidence: [String: String],
+        _ key: String
+    ) -> String? {
+        guard let value = evidence[key], !value.isEmpty else { return nil }
+        return value
     }
 
     private func blockedPlan() -> PreparationPlan {

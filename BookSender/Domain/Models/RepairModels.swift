@@ -3,10 +3,11 @@ import Foundation
 enum RepairAction: Codable, Equatable, Sendable {
     case rebuildMimetype
     case restoreContainer(packagePath: String)
-    case correctMediaType(path: String, mediaType: String)
+    case correctMediaType(package: String, href: String, from: String, to: String)
     case normalizePath(from: String, to: String)
     case repairReference(document: String, from: String, to: String)
     case normalizeXML(path: String)
+    case removeDanglingSpineItem(package: String, idref: String)
 
     var identifier: String {
         switch self {
@@ -16,6 +17,7 @@ enum RepairAction: Codable, Equatable, Sendable {
         case .normalizePath: "repair.path"
         case .repairReference: "repair.reference"
         case .normalizeXML: "repair.xml"
+        case .removeDanglingSpineItem: "repair.spine"
         }
     }
 }

@@ -182,6 +182,162 @@ struct EPUBRepairEngineTests {
         #expect(String(describing: result.failure).contains("raw-writer") == false)
     }
 
+    @Test(arguments: [
+        "repair.container",
+        "repair.media-type",
+        "repair.reference",
+        "repair.xml",
+        "repair.spine",
+        "repair.path",
+        "repair.unknown",
+    ])
+    func blocksAutomaticRuleWithoutEvidence(rule: String) {
+        let report = AuditReport(
+            id: UUID(),
+            findings: [finding(.referenceMissing, rule: rule)],
+            inspectedAt: Date()
+        )
+
+        let plan = planEngine().plan(for: report)
+
+        #expect(plan.decision == .blocked)
+        #expect(plan.actions.isEmpty)
+    }
+
+    @Test
+    func blocksMediaTypeRepairWhenEvidenceIsIncomplete() {
+        let report = AuditReport(
+            id: UUID(),
+            findings: [
+                finding(.mimetypeMissing, rule: "repair.mimetype"),
+                finding(
+                    .manifestMediaTypeMismatch,
+                    rule: "repair.media-type",
+                    evidence: [
+                        "package": "OEBPS/content.opf",
+                        "href": "Fonts/book.ttf",
+                    ]
+                ),
+            ],
+            inspectedAt: Date()
+        )
+
+        let plan = planEngine().plan(for: report)
+
+        #expect(plan.decision == .blocked)
+        #expect(plan.actions.isEmpty)
+    }
+
+    @Test
+    func plansEachRuleInFirstSeenOrderAndDropsOnlyEqualActions() {
+        let report = AuditReport(
+            id: UUID(),
+            findings: [
+                finding(
+                    .containerInvalid,
+                    rule: "repair.xml",
+                    evidence: ["path": "META-INF/container.xml"]
+                ),
+                finding(
+                    .manifestMediaTypeMismatch,
+                    rule: "repair.media-type",
+                    evidence: [
+                        "package": "OEBPS/content.opf",
+                        "href": "Fonts/a.ttf",
+                        "declared": "application/x-font-truetype",
+                        "expected": "font/ttf",
+                    ]
+                ),
+                finding(.mimetypeMissing, rule: "repair.mimetype"),
+                finding(
+                    .referenceMissing,
+                    rule: "repair.spine",
+                    evidence: [
+                        "package": "OEBPS/content.opf",
+                        "idref": "missing",
+                    ]
+                ),
+                finding(
+                    .referenceMissing,
+                    rule: "repair.reference",
+                    evidence: [
+                        "package": "OEBPS/content.opf",
+                        "from": "Chapter.xhtml",
+                        "to": "chapter.xhtml",
+                    ]
+                ),
+                finding(
+                    .containerMissing,
+                    rule: "repair.container",
+                    evidence: ["package": "OEBPS/content.opf"]
+                ),
+                finding(.mimetypeCompressed, rule: "repair.mimetype"),
+                finding(
+                    .manifestMediaTypeMismatch,
+                    rule: "repair.media-type",
+                    evidence: [
+                        "package": "OEBPS/content.opf",
+                        "href": "Fonts/a.ttf",
+                        "declared": "application/x-font-truetype",
+                        "expected": "font/ttf",
+                    ]
+                ),
+                finding(
+                    .manifestMediaTypeMismatch,
+                    rule: "repair.media-type",
+                    evidence: [
+                        "package": "OEBPS/content.opf",
+                        "href": "Fonts/b.ttf",
+                        "declared": "application/x-font-truetype",
+                        "expected": "font/ttf",
+                    ]
+                ),
+            ],
+            inspectedAt: Date()
+        )
+
+        let plan = planEngine().plan(for: report)
+
+        #expect(plan.decision == .writeEPUBWorkingCopy)
+        #expect(
+            plan.actions == [
+                .normalizeXML(path: "META-INF/container.xml"),
+                .correctMediaType(
+                    package: "OEBPS/content.opf",
+                    href: "Fonts/a.ttf",
+                    from: "application/x-font-truetype",
+                    to: "font/ttf"
+                ),
+                .rebuildMimetype,
+                .removeDanglingSpineItem(
+                    package: "OEBPS/content.opf",
+                    idref: "missing"
+                ),
+                .repairReference(
+                    document: "OEBPS/content.opf",
+                    from: "Chapter.xhtml",
+                    to: "chapter.xhtml"
+                ),
+                .restoreContainer(packagePath: "OEBPS/content.opf"),
+                .correctMediaType(
+                    package: "OEBPS/content.opf",
+                    href: "Fonts/b.ttf",
+                    from: "application/x-font-truetype",
+                    to: "font/ttf"
+                ),
+            ]
+        )
+    }
+
+    private func planEngine() -> EPUBRepairEngine {
+        EPUBRepairEngine(
+            writer: FailingArchiveWriter(
+                failure: sanitizedFailure(.unexpectedRepair, family: .repair)
+            ),
+            workspaceStore: WorkspaceStore()
+        )
+    }
+
     private func finding(
         _ code: FindingCode,
         rule: String,
