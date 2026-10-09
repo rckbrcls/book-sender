@@ -155,18 +155,15 @@ struct EPUBAuditRuleTests {
         #expect(caseFinding.evidence["from"] == "Chapter.xhtml")
         #expect(caseFinding.evidence["to"] == "chapter.xhtml")
 
+        // Swift treats canonically equivalent strings as equal, so a
+        // decomposed href already resolves to the composed archive path.
         let composed = "OEBPS/caf\u{00E9}.xhtml"
         let decomposed = "caf\u{0065}\u{0301}.xhtml"
         let canonical = try await referenceReport(
             href: decomposed,
             files: [composed: Data("x".utf8)]
         )
-        let canonicalFinding = try #require(
-            canonical.findings.first { $0.code == .referenceMissing }
-        )
-        #expect(ruleID(canonicalFinding) == "repair.reference")
-        #expect(canonicalFinding.evidence["from"] == decomposed)
-        #expect(canonicalFinding.evidence["to"] == "caf\u{00E9}.xhtml")
+        #expect(!canonical.findings.contains { $0.code == .referenceMissing })
 
         let basename = try await referenceReport(
             href: "text/chapter.xhtml",
@@ -652,7 +649,8 @@ private func archive(
     if let package {
         entries.append(MemoryEntry(path: packagePath, data: package))
     }
-    for (path, data) in files.sorted(by: { $0.key < $1.key }) where path != packagePath {
+    for (path, data) in files.sorted(by: { $0.key < $1.key })
+    where package == nil || path != packagePath {
         entries.append(MemoryEntry(path: path, data: data))
     }
     return MemoryEPUBArchive(entries: entries)

@@ -335,7 +335,7 @@ struct EPUBArchiveWriter: EPUBArchiveWriting {
             compressionMethod: compression,
             provider: { position, size in
                 try Task.checkCancellation()
-                data.subdata(in: Int(position)..<Int(position) + size)
+                return data.subdata(in: Int(position)..<Int(position) + size)
             }
         )
     }
