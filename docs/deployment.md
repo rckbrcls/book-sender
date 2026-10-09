@@ -7,7 +7,7 @@ Pages, and the `rckbrcls.com` proxy.
 
 | Item | Value |
 | --- | --- |
-| Repository | `rckbrcls/page-forge` |
+| Repository | `rckbrcls/book-sender` |
 | Branch | `main` |
 | Project | `BookSender.xcodeproj` |
 | Scheme | `BookSender` |
@@ -15,7 +15,7 @@ Pages, and the `rckbrcls.com` proxy.
 | Bundle identifier | `com.rckbrcls.BookSender` |
 | Release asset | `BookSender-macos-universal-vX.Y.Z.zip` |
 | Appcast source | `appcast.xml` |
-| Pages appcast | `https://rckbrcls.github.io/page-forge/book-sender/appcast.xml` |
+| Pages appcast | `https://rckbrcls.github.io/book-sender/book-sender/appcast.xml` |
 | Canonical appcast | `https://rckbrcls.com/api/book-sender/appcast.xml` |
 | Installer | `https://rckbrcls.com/api/book-sender/install` |
 | Signing identity | `Book Sender Release Signing` |

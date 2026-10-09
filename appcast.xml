@@ -2,7 +2,7 @@
 <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
     <channel>
         <title>Book Sender</title>
-        <link>https://github.com/rckbrcls/page-forge</link>
+        <link>https://github.com/rckbrcls/book-sender</link>
         <description>Book Sender updates</description>
         <language>en</language>
         <item>

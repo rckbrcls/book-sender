@@ -38,7 +38,7 @@ def main() -> None:
                 "--title",
                 "Book Sender",
                 "--link",
-                "https://github.com/rckbrcls/page-forge",
+                "https://github.com/rckbrcls/book-sender",
                 "--description",
                 "Book Sender updates",
                 "--language",
@@ -53,7 +53,7 @@ def main() -> None:
                 "Wed, 29 Jul 2026 00:00:00 +0000",
                 "--enclosure-url",
                 (
-                    "https://github.com/rckbrcls/page-forge/releases/download/"
+                    "https://github.com/rckbrcls/book-sender/releases/download/"
                     "v1.2.3/BookSender-macos-universal-v1.2.3.zip"
                 ),
                 "--enclosure-length",

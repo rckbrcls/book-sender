@@ -8,9 +8,9 @@ BUNDLE_IDENTIFIER="com.rckbrcls.BookSender"
 SIGNING_CERTIFICATE_SHA1="51F0C83093408095C09F3CF5359EB7C83B7F6B38"
 PINNED_DESIGNATED_REQUIREMENT='certificate root = H"51f0c83093408095c09f3cf5359eb7c83b7f6b38" and identifier "com.rckbrcls.BookSender"'
 ASSET_PREFIX="BookSender-macos-universal-v"
-REPO="rckbrcls/page-forge"
+REPO="rckbrcls/book-sender"
 GITHUB_API="https://api.github.com/repos/${REPO}/releases"
-SIGNING_CERTIFICATE_URL="https://rckbrcls.github.io/page-forge/book-sender/BookSenderReleaseSigning.cer"
+SIGNING_CERTIFICATE_URL="https://rckbrcls.github.io/book-sender/book-sender/BookSenderReleaseSigning.cer"
 
 ARCHIVE_OVERRIDE="${BOOKSENDER_INSTALLER_ARCHIVE_PATH:-}"
 CERTIFICATE_OVERRIDE="${BOOKSENDER_INSTALLER_CERTIFICATE_PATH:-}"

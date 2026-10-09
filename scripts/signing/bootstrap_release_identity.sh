@@ -4,7 +4,7 @@ set -euo pipefail
 
 IDENTITY_NAME="Book Sender Release Signing"
 PASSWORD_SERVICE="Book Sender Release Signing PKCS12 Password"
-REPOSITORY="rckbrcls/page-forge"
+REPOSITORY="rckbrcls/book-sender"
 CERTIFICATE_OUTPUT="scripts/signing/BookSenderReleaseSigning.cer"
 BACKUP_DIRECTORY=""
 REPLACE_INCOMPLETE=false
