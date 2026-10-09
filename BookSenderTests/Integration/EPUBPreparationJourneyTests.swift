@@ -6,6 +6,7 @@ struct EPUBPreparationJourneyTests {
     @Test(arguments: [
         FixtureFactory.EPUBVariant.validEPUB3,
         .epub2LegacyTrueTypeMediaType,
+        .rootPackageLegacyTrueType,
         .missingMimetype,
         .missingContainer,
     ])
