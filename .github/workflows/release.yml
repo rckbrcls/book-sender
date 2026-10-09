@@ -30,7 +30,7 @@ jobs:
       APP_BUNDLE_NAME: BookSender.app
       APP_DISPLAY_NAME: BookSender
       BUNDLE_IDENTIFIER: com.rckbrcls.BookSender
-      REPO: rckbrcls/page-forge
+      REPO: rckbrcls/book-sender
       APPCAST_PATH: appcast.xml
       SPARKLE_TOOLS_VERSION: 2.9.2
     steps:
@@ -557,7 +557,7 @@ jobs:
       - build_release_candidate
       - validate_clean_consumer
     env:
-      REPO: rckbrcls/page-forge
+      REPO: rckbrcls/book-sender
       APPCAST_PATH: appcast.xml
       SHORT_VERSION: ${{ inputs.version }}
       BUILD_VERSION: ${{ github.run_number }}
