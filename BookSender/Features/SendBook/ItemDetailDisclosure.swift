@@ -50,7 +50,7 @@ struct ItemDetailDisclosure: View {
                     }
                     ForEach(item.appliedActions) { action in
                         Label(
-                            actionTitle(action.action),
+                            Self.actionTitle(for: action.action),
                             systemImage: action.verified
                                 ? "checkmark"
                                 : "exclamationmark"
@@ -141,7 +141,7 @@ struct ItemDetailDisclosure: View {
         }
     }
 
-    private func actionTitle(_ action: RepairAction) -> String {
+    static func actionTitle(for action: RepairAction) -> String {
         switch action {
         case .rebuildMimetype: "Rebuilt EPUB package marker"
         case .restoreContainer: "Restored EPUB container"
@@ -149,6 +149,7 @@ struct ItemDetailDisclosure: View {
         case .normalizePath: "Normalized resource path"
         case .repairReference: "Repaired internal reference"
         case .normalizeXML: "Normalized EPUB XML"
+        case .removeDanglingSpineItem: "Removed dangling spine entry"
         }
     }
 }
