@@ -27,7 +27,6 @@ Pages, and the `rckbrcls.com` proxy.
 
 ```text
 GitHub Actions
--> approved unit and UI suites
 -> installer and appcast contract suites
 -> universal Release build
 -> pinned self-signed release signing

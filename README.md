@@ -151,6 +151,6 @@ lookup, privacy guarantees, and support guidance, see
 Static checks, compilation, automated tests, runtime inspection, authenticated
 SMTP delivery, release signing, update installation, and production release are
 separate validation claims. Build and test commands require explicit
-authorization under the repository workflow. The release workflow now requires
-the approved unit, UI, installer, and appcast contract suites before it can
-publish an artifact.
+authorization under the repository workflow. The release workflow requires
+the installer, signing, and appcast contract suites before it can publish an
+artifact. Unit and UI suites are run locally before dispatching a release.
